@@ -7,7 +7,21 @@
             "label": "unittest",
             "type": "shell",
             "command": "python -m unittest discover",
-            "group": "test"
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "main",
+            "type": "shell",
+            "command": "python nacbrac.py",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
         }
     ]
 }
