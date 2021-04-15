@@ -86,3 +86,10 @@ class TestGameboard(TestCase):
         expected = [Move(before=1, after=-1, num_cards=1)]
         self.assertEqual(expected, self.gameboard.get_wildcard_slot_moves())
         
+    def test__some_board(self):
+        self.gameboard = Gameboard.from_str("0d10s6s10s0s6d0c9d8d7s9s0d0h7s10d0s6d0c10d0d8s0s7d0h0c8d7d0h0s0h9s9d6s0c0d8c")
+        solution = [Move(before=1, after=0, num_cards=1), Move(before=2, after=4, num_cards=1), Move(before=5, after=6, num_cards=1), Move(before=5, after=8, num_cards=1), Move(before=3, after=5, num_cards=1), Move(before=2, after=3, num_cards=1), Move(before=2, after=3, num_cards=2), Move(before=1, after=2, num_cards=1), Move(before=1, after=3, num_cards=1), Move(before=1, after=5, num_cards=1), Move(before=5, after=1, num_cards=3), Move(before=5, after=0, num_cards=1), Move(before=6, after=5, num_cards=2), Move(before=8, after=7, num_cards=2), Move(before=8, after=4, num_cards=1), Move(before=2, after=8, num_cards=1), Move(before=6, after=2, num_cards=1), Move(before=2, after=0, num_cards=1), Move(before=0, after=2, num_cards=4), Move(before=0, after=2, num_cards=1), Move(before=7, after=0, num_cards=3), Move(before=6, after=7, num_cards=1), Move(before=6, after=8, num_cards=1), Move(before=0, after=6, num_cards=4), Move(before=0, after=4, num_cards=1), Move(before=3, after=0, num_cards=5), Move(before=3, after=7, num_cards=1), Move(before=3, after=5, num_cards=1), Move(before=4, after=3, num_cards=4), Move(before=7, after=4, num_cards=3), Move(before=5, after=7, num_cards=3), Move(before=4, after=5, num_cards=4), Move(before=4, after=8, num_cards=1), Move(before=4, after=5, num_cards=1), Move(before=7, after=4, num_cards=4), Move(before=1, after=7, num_cards=3), Move(before=8, after=1, num_cards=4), Move(before=8, after=6, num_cards=1)]
+        for move in solution:
+            print(move)
+            self.gameboard.execute(move)
+            print(self.gameboard)

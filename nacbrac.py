@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, unique
 from typing import List, Union, Set
 import datetime
+import re
 
 @unique
 class Suit(Enum):
@@ -69,9 +70,11 @@ class WildcardSlot:
 
 @dataclass
 class Move:
-    before: int # negative means wildcard slot
-    after: int # negative means wildcard slot
-    num_cards: int
+    before: int # slot idx, negative means wildcard slot
+    after: int # slot idx, negative means wildcard slot
+    num_cards: int # num of cards to be moved
+    before_idx: int # idx of the bottom card to be moved
+    after_idx: int = -1 # idx of the card to be moved to
 
     def is_before_wildcard_slot(self) -> bool:
         return self.before < 0
@@ -88,8 +91,7 @@ class Gameboard:
     field_slots: List[List[Card]] = field(default_factory=empty_field_slots)
 
     def validate(self) -> bool:
-        if len(self.field_slots) != 9:
-            return False
+        assert len(self.field_slots) == 9, f"Has {len(self.field_slots)} slots. Less than 9 slots!"
 
         cards: List[Card] = []
         # count all cards
@@ -99,44 +101,39 @@ class Gameboard:
             for card in card_stack:
                 cards.append(card)
 
-        if not (len(cards) == 36):
-            return False
-        hearts = [card for card in cards if card.suit == Suit.Heart]
-        diamonds = [card for card in cards if card.suit == Suit.Diamond]
-        spades = [card for card in cards if card.suit == Suit.Spade]
-        clubs = [card for card in cards if card.suit == Suit.Club]
-        if not (len(hearts) == 9 and len(diamonds) == 9 and len(spades) == 9 and len(clubs) == 9):
-            return False
-        card_groups: List[List[Card]] = [hearts, diamonds, spades, clubs]
-        for card_group in card_groups:
-            non_face_cards = [card for card in card_group if not card.is_face()]
-            if not (len(non_face_cards) == 5):
-                return False
-            values = [card.value for card in non_face_cards]
-            values.sort()
-            if values != [6, 7, 8, 9, 10]:
-                return False
+        assert len(cards) == 36, f"Has {len(cards)} cards. Must have 36 cards!"
+
+        face_cards = [card for card in cards if card.is_face()]
+        heart_faces = [card for card in face_cards if card.suit == Suit.Heart]
+        diamonds_faces = [card for card in face_cards if card.suit == Suit.Diamond]
+        spades_faces = [card for card in face_cards if card.suit == Suit.Spade]
+        clubs_faces = [card for card in face_cards if card.suit == Suit.Club]
+        assert (len(heart_faces) == 4 and len(diamonds_faces) == 4 and len(spades_faces) == 4 and len(clubs_faces) == 4), \
+            "Each suit must hat 4 face cards!"
+
+        value_cards = [card for card in cards if not card.is_face()]
+        unique_values = set([card.value for card in value_cards])
+
+        for unique_value in unique_values:
+            cards_of_value = [card for card in value_cards if card.value == unique_value]
+            assert len(cards_of_value) == 4, f"Value {unique_value} has {len(cards_of_value)} cards. There should be 4."
+            assert sum([1 for card in cards_of_value if card.is_red()]) == 2, f"There should be 2 red 2 black for cards of value {unique_value}"
         return True
 
     def execute(self, move: Move) -> None:
-        # print("exec: {}".format(repr(move)))
-        try:
-            if move.is_after_wildcard_slot():
-                card = self.field_slots[move.before].pop()
-                self.wildcard_slot.push(card)
-            elif move.is_before_wildcard_slot():
-                card = self.wildcard_slot.pop()
-                self.field_slots[move.after].append(card)
-            else:
-                cards = self.field_slots[move.before][-move.num_cards:]
-                self.field_slots[move.after].extend(cards)
-                before_list = self.field_slots[move.before]
-                self.field_slots[move.before] = before_list[:(len(before_list)-move.num_cards)]
-        except:
-            pdb.set_trace()
+        if move.is_after_wildcard_slot():
+            card = self.field_slots[move.before].pop()
+            self.wildcard_slot.push(card)
+        elif move.is_before_wildcard_slot():
+            card = self.wildcard_slot.pop()
+            self.field_slots[move.after].append(card)
+        else:
+            cards = self.field_slots[move.before][-move.num_cards:]
+            self.field_slots[move.after].extend(cards)
+            before_list = self.field_slots[move.before]
+            self.field_slots[move.before] = before_list[:(len(before_list)-move.num_cards)]
 
     def undo(self, move: Move) -> None:
-        # print("undo: {}".format(repr(move)))
         if move.is_after_wildcard_slot():
             card = self.wildcard_slot.pop()
             self.field_slots[move.before].append(card)
@@ -177,21 +174,24 @@ class Gameboard:
                         # don't move values from sub-stack to another sub-stack (noop)
                         if (not (not to_slot and num_cards == len(from_slot))) \
                             and (not (not from_slot[-num_cards].is_face() and len(to_slot) > 0 and num_cards < len(from_slot) and from_slot[-(num_cards+1)].value == to_slot[-1].value)):
-                            valid_moves.append(Move(from_idx, to_idx, num_cards))
+                            valid_moves.append(Move(from_idx, to_idx, num_cards, len(from_slot) - num_cards, max(len(to_slot) - 1, 0)))
                         # move the whole stack, ignore partial moves
                         break
         return valid_moves
 
     def get_wildcard_slot_moves(self) -> List[Move]:
         valid_moves: List[Move] = []
-        if not self.wildcard_slot.has_card():
-            for from_idx in range(0, 9):
-                field_slot = self.field_slots[from_idx]
+        if self.wildcard_slot.has_card(): # wildcard slot to field
+            for to_idx, field_slot in enumerate(self.field_slots):
+                if self._can_move_cards(self.wildcard_slot.peek(), field_slot):
+                    valid_moves.append(Move(-1, to_idx, 1, -1, max(len(field_slot) - 1), 0))
+        else: # field to wildcard slot
+            for from_idx, field_slot in enumerate(self.field_slots):
                 if len(field_slot) > 1:
                     last_card = field_slot[-1]
                     prev_card = field_slot[-2]
                     if not self._can_move_cards([last_card], [prev_card]):
-                        valid_moves.append(Move(from_idx, -1, 1))
+                        valid_moves.append(Move(from_idx, -1, 1, len(field_slot) - 1))
         return valid_moves
 
     def _can_move_cards(self, cards: List[Card], to_slot: List[Card]) -> bool:
@@ -257,18 +257,33 @@ class Gameboard:
 
     @staticmethod
     def from_str(source: str):
-        groups = source.split('|')
-        wildcard_str = groups[0]
-        field_slots_str = groups[1:]
-        field_slots: List[List[Card]] = []
-        for field_slot_str in field_slots_str:
-            field_slot: List[Card] = []
-            card_strs = field_slot_str.split(",")
-            for card_str in card_strs:
-                if card_str:
-                    field_slot.append(Card.from_str(card_str))
-            field_slots.append(field_slot)
-        return Gameboard(wildcard_slot=WildcardSlot.from_str(wildcard_str), field_slots=field_slots)
+        source = source.upper()
+        if '|' in source:
+            groups = source.split('|')
+            wildcard_str = groups[0]
+            field_slots_str = groups[1:]
+            field_slots: List[List[Card]] = []
+            for field_slot_str in field_slots_str:
+                field_slot: List[Card] = []
+                if "," in field_slot_str:
+                    card_strs = field_slot_str.split(",")
+                else:
+                    card_strs = re.findall(r"[0-9]{1,2}[A-Z]{1}", field_slot_str)
+                for card_str in card_strs:
+                    if card_str:
+                        field_slot.append(Card.from_str(card_str))
+                field_slots.append(field_slot)
+            return Gameboard(wildcard_slot=WildcardSlot.from_str(wildcard_str), field_slots=field_slots)
+        else:
+            card_str = re.findall(r"[0-9]{1,2}[A-Z]{1}", source)
+            assert len(card_str) == 36, f"Incorrect number of cards: {len(card_str)}"
+            all_str = ""
+            for i in range(0, 36):
+                if i % 4 == 0:
+                    all_str += "|"
+                all_str += card_str[i]
+            all_str = "_" + all_str
+            return Gameboard.from_str(all_str)
 
 class NacbracSolver(ABC):
     @abstractmethod
@@ -323,11 +338,6 @@ class DfsSolver(NacbracSolver):
 
 SOME_INITIAL_GAMEBOARD = "_|8H,0C,0S,0S|0H,8D,0S,0D|10H,6H,10D,7H|0H,0S,9D,9H|7D,0H,0C,0H|9S,7C,8C,8S|0D,0D,0C,6D|6S,10S,0D,9C|7S,10C,6C,0C"
 
-def interactive_solution(solution: List[Move]):
-    for move in solution:
-        print("({} -> {})".format(move.before, move.after))
-        input()
-
 def pretty_format_solution(solution: List[Move]):
     return ", ".join(["({} -> {})".format(move.before, move.after) for move in solution])
 
@@ -339,13 +349,25 @@ def main():
     print("starttime {}".format(starttime))
 
     gameboard_str = SOME_INITIAL_GAMEBOARD
-    solution: List[Move] = solver.solve(Gameboard.from_str(gameboard_str))
+    # gameboard_str = "_|8D,0H,0H,0C|7S,10D,0S,0C|9D,8D,7C,8C|9D,7D,0D,6S|0H,6D,0C,9C|0C,0S,0S,0D|0H,0D,9S,7D|10S,6S,10S,0S|0D,10D,6D,8C"
+    # gameboard_str = "0d10s6s10s0s6d0c9d8d7s9s0d0h7s10d0s6d0c10d0d8s0s7d0h0c8d7d0h0s0h9s9d6s0c0d8c"
+    # gameboard_str = input("Input your board, then press Enter")
+
+    # The ones that are stuck:
+    # TODO: might be a bug in using wildcard slot
+    gameboard_str = "_|6D,8S,8D,0H|0D,7S,8D,0D|0H,0C,0D,10S|0S,9S,7S,9S|6D,0S,0D,0C|0H,0S,0H,9D|0C,0S,0C,8S|7D,7D,10D,10D|6S,9D,6S,10S"
+    # gameboard_str = "_|7S,6S,6D,8D|10D,9D,6D,10D|0D,0H,0H,0C|9S,10S,0S,0S|8D,0D,0H,0D|7S,0C,0S,0S|0D,8S,8S,9S|0H,0C,7D,10S|7D,9D,0C,6S"
+    # gameboard_str = "_|0H,9D,8S,0D|0D,0D,6S,7D|9S,10D,0C,0H|8D,6D,0C,0H|0H,0D,10S,9D|7S,10D,0S,6S|0S,9S,8D,7S|0S,10S,0S,7D|8S,0C,6D,0C"
+    gameboard = Gameboard.from_str(gameboard_str)
+    print(gameboard)
+
+    solution: List[Move] = solver.solve(gameboard)
     
     endtime = datetime.datetime.now()
     print("endtime {}".format(endtime))
     print("It took {}".format(endtime - starttime))
+    print(solution)
     print("{} moves, solution [{}]".format(len(solution), pretty_format_solution(solution)))
-    #interactive_solution(solution)
 
 if __name__ == "__main__":
     main()
